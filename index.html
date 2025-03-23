@@ -1,0 +1,146 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Trident - Music Player</title>
+    <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Roboto:wght@400;500;700&display=swap">
+    <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+    <div class="preloader" id="preloader">
+        <div class="preloader-content">
+            <img src="green_trident_logo_100x100-removebg-preview.png" alt="Trident Logo" class="preloader-logo">
+            <h1>Trident</h1>
+        </div>
+    </div>
+    <div class="player" id="player" style="display: none;">
+        <canvas id="visualizer" class="visualizer"></canvas>
+        <button id="expand-sidebar" class="expand-btn">▶</button>
+        <div class="sidebar">
+            <div class="header">
+                <button id="collapse-sidebar" class="collapse-btn">◀</button>
+                <h1>Trident</h1>
+                <label class="upload-btn"><span>Upload</span><input type="file" id="songInput" webkitdirectory directory multiple hidden></label>
+            </div>
+            <div class="search-bar">
+                <input type="text" id="search" placeholder="Search songs...">
+            </div>
+            <div class="playlist" id="playlist"></div>
+        </div>
+        <div class="main">
+            <div class="now-playing">
+                <div class="album-art"></div>
+                <div class="track-info">
+                    <div class="song-title">No song selected</div>
+                    <div class="artist">Unknown Artist</div>
+                    <div class="album">Unknown Album</div>
+                </div>
+            </div>
+            <div class="controls">
+                <div class="progress-container">
+                    <span class="time current-time">0:00</span>
+                    <div class="progress-wrapper">
+                        <div class="progress-bar" id="progress-bar">
+                            <div class="progress-fill" id="progress-fill"></div>
+                            <div class="progress-handle" id="progress-handle"></div>
+                            <div class="progress-tooltip" id="progress-tooltip">0:00</div>
+                        </div>
+                    </div>
+                    <span class="time duration">0:00</span>
+                </div>
+                <div class="control-buttons">
+                    <button class="control-btn" id="prev" data-tooltip="Previous">⏮</button>
+                    <button class="control-btn" id="rewind" data-tooltip="Rewind 10s">⏪</button>
+                    <button class="control-btn" id="play-pause" data-tooltip="Play/Pause">⏵</button>
+                    <button class="control-btn" id="fast-forward" data-tooltip="Fast Forward 10s">⏩</button>
+                    <button class="control-btn" id="next" data-tooltip="Next">⏭</button>
+                </div>
+                <div class="playback-options">
+                    <button class="control-btn" id="playback-mode" data-tooltip="No playback mode">🚫</button>
+                    <button class="control-btn" id="equalizer-btn" data-tooltip="Equalizer">🎚️</button>
+                </div>
+                <div class="volume-container">
+                    <button class="volume-btn" id="volume-down" data-tooltip="Volume Down">🔉</button>
+                    <div class="volume-bar">
+                        <div class="volume-fill" id="volume-fill"></div>
+                        <div class="volume-handle" id="volume-handle"></div>
+                        <input type="range" min="0" max="1" step="0.01" value="1" id="volume">
+                    </div>
+                    <button class="volume-btn" id="volume-up" data-tooltip="Volume Up">🔊</button>
+                </div>
+            </div>
+        </div>
+        <div class="modal" id="equalizer-modal">
+            <div class="modal-content">
+                <span class="modal-close" id="equalizer-close">×</span>
+                <h2>Equalizer</h2>
+                <div class="preset-container">
+                    <button class="preset-btn" data-preset="flat">Flat</button>
+                    <button class="preset-btn" data-preset="bass">Bass Boost</button>
+                    <button class="preset-btn" data-preset="treble">Treble Boost</button>
+                    <button class="preset-btn" data-preset="pop">Pop</button>
+                    <button class="preset-btn" data-preset="rock">Rock</button>
+                    <button class="preset-btn" data-preset="custom">Custom</button>
+                </div>
+                <div class="eq-sliders" id="eq-sliders">
+                    <div class="slider-group">
+                        <span class="gain-value">0 dB</span>
+                        <input type="range" min="-12" max="12" value="0" step="0.1" data-freq="32">
+                        <label>32 Hz</label>
+                    </div>
+                    <div class="slider-group">
+                        <span class="gain-value">0 dB</span>
+                        <input type="range" min="-12" max="12" value="0" step="0.1" data-freq="64">
+                        <label>64 Hz</label>
+                    </div>
+                    <div class="slider-group">
+                        <span class="gain-value">0 dB</span>
+                        <input type="range" min="-12" max="12" value="0" step="0.1" data-freq="125">
+                        <label>125 Hz</label>
+                    </div>
+                    <div class="slider-group">
+                        <span class="gain-value">0 dB</span>
+                        <input type="range" min="-12" max="12" value="0" step="0.1" data-freq="250">
+                        <label>250 Hz</label>
+                    </div>
+                    <div class="slider-group">
+                        <span class="gain-value">0 dB</span>
+                        <input type="range" min="-12" max="12" value="0" step="0.1" data-freq="500">
+                        <label>500 Hz</label>
+                    </div>
+                    <div class="slider-group">
+                        <span class="gain-value">0 dB</span>
+                        <input type="range" min="-12" max="12" value="0" step="0.1" data-freq="1000">
+                        <label>1 kHz</label>
+                    </div>
+                    <div class="slider-group">
+                        <span class="gain-value">0 dB</span>
+                        <input type="range" min="-12" max="12" value="0" step="0.1" data-freq="2000">
+                        <label>2 kHz</label>
+                    </div>
+                    <div class="slider-group">
+                        <span class="gain-value">0 dB</span>
+                        <input type="range" min="-12" max="12" value="0" step="0.1" data-freq="4000">
+                        <label>4 kHz</label>
+                    </div>
+                    <div class="slider-group">
+                        <span class="gain-value">0 dB</span>
+                        <input type="range" min="-12" max="12" value="0" step="0.1" data-freq="8000">
+                        <label>8 kHz</label>
+                    </div>
+                    <div class="slider-group">
+                        <span class="gain-value">0 dB</span>
+                        <input type="range" min="-12" max="12" value="0" step="0.1" data-freq="16000">
+                        <label>16 kHz</label>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+    <audio id="audioPlayer"></audio>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/jsmediatags/3.9.5/jsmediatags.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r134/three.min.js"></script>
+    <script src="script.js"></script>
+</body>
+</html>
