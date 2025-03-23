@@ -1,3 +1,4 @@
+// script.js
 const audioPlayer = document.getElementById('audioPlayer');
 const songInput = document.getElementById('songInput');
 const playlist = document.getElementById('playlist');
@@ -50,14 +51,13 @@ const validExtensions = ['.mp3', '.flac', '.m4a', '.wav'];
 
 // Preloader
 window.addEventListener('load', () => {
-    audioContext = new (window.AudioContext || window.webkitAudioContext)(); // Init early
     setTimeout(() => {
         preloader.classList.add('fade-out');
         setTimeout(() => {
             preloader.style.display = 'none';
             player.style.display = 'block';
-        }, 1000);
-    }, 2000);
+        }, 1000); // Match transition duration
+    }, 2000); // Show preloader for 2 seconds
 });
 
 songInput.addEventListener('change', handleFiles);
@@ -93,9 +93,12 @@ function handleFiles(e) {
     const files = Array.from(e.target.files).filter(file => 
         validExtensions.some(ext => file.name.toLowerCase().endsWith(ext))
     );
+    console.log('Files detected:', files.map(f => f.webkitRelativePath));
     songs = organizeSongs(files);
+    console.log('Organized songs:', [...songs]);
     localStorage.setItem('songs', JSON.stringify([...songs]));
     flatSongs = songsFlatWithStructure(songs);
+    console.log('Flat songs:', flatSongs);
     displaySongs();
 }
 
@@ -113,7 +116,7 @@ function organizeSongs(files) {
         const fileName = pathParts[pathParts.length - 1];
         if (validExtensions.some(ext => fileName.toLowerCase().endsWith(ext))) {
             current.set(fileName, {
-                path: URL.createObjectURL(file), // For static hosting, replace with direct URLs
+                path: URL.createObjectURL(file),
                 name: fileName,
                 relativePath: file.webkitRelativePath,
                 file: file
@@ -204,6 +207,7 @@ function toggleFolderPlayback(key, map, button, folderDiv) {
             .filter(([_, v]) => !(v instanceof Map))
             .map(([_, song]) => song)
             .sort((a, b) => a.name.localeCompare(b.name));
+        console.log(`Playing folder ${key}:`, currentPlaylist);
         isFolderPlayback = true;
         if (currentPlaylist.length > 0) {
             currentPlayingButton = button;
@@ -245,15 +249,8 @@ function filterMap(map, query) {
 }
 
 async function playSong(song) {
-    if (audioPlayer.src && audioPlayer.src.startsWith('blob:')) {
-        URL.revokeObjectURL(audioPlayer.src); // Clean up old blob URLs
-    }
     currentSongIndex = flatSongs.findIndex(s => s.path === song.path);
     audioPlayer.src = song.path;
-    audioPlayer.preload = 'auto'; // Preload for faster playback
-    await new Promise(resolve => {
-        audioPlayer.addEventListener('canplay', resolve, { once: true });
-    });
     await audioPlayer.play().catch(err => console.error('Play error:', err));
     isPlaying = true;
     playPauseBtn.textContent = '⏸';
@@ -343,6 +340,7 @@ function handleSongEnd() {
                 const randomIndex = Math.floor(Math.random() * flatSongs.length);
                 playSong(flatSongs[randomIndex]);
                 break;
+            case 'off':
             default:
                 break;
         }
@@ -361,7 +359,8 @@ function setProgress(e) {
     const percentage = ((e.clientX - rect.left) / rect.width) * 100;
     const time = (percentage / 100) * audioPlayer.duration;
     audioPlayer.currentTime = time;
-    updateProgress();
+    progressFill.style.width = `${percentage}%`;
+    progressHandle.style.left = `calc(${percentage}% - 7px)`;
 }
 
 function showTooltip(e) {
@@ -404,22 +403,41 @@ async function fetchMetadata(song) {
     album.textContent = 'Unknown Album';
     albumArt.style.backgroundImage = '';
 
-    if (!song.file || typeof jsmediatags === 'undefined') return;
+    if (!song.file) {
+        console.error('No file object available for metadata:', song);
+        return;
+    }
 
+    if (typeof jsmediatags === 'undefined') {
+        console.error('jsmediatags library not loaded.');
+        return;
+    }
+
+    console.log('Attempting to read metadata for:', song.name);
     return new Promise((resolve) => {
         jsmediatags.read(song.file, {
             onSuccess: function(tag) {
                 const { title, artist: artistName, album: albumName, picture } = tag.tags;
+                console.log('Metadata fetched:', { title, artistName, albumName, hasPicture: !!picture });
+                
                 songTitle.textContent = title || song.name.split('.').slice(0, -1).join('.');
                 artist.textContent = artistName || 'Unknown Artist';
                 album.textContent = albumName || 'Unknown Album';
+                
                 if (picture) {
-                    const base64String = btoa(String.fromCharCode.apply(null, new Uint8Array(picture.data)));
-                    albumArt.style.backgroundImage = `url(data:${picture.format};base64,${base64String})`;
+                    const base64String = btoa(
+                        String.fromCharCode.apply(null, new Uint8Array(picture.data))
+                    );
+                    const imageUrl = `data:${picture.format};base64,${base64String}`;
+                    albumArt.style.backgroundImage = `url(${imageUrl})`;
+                    console.log('Album art set:', imageUrl.substring(0, 50) + '...');
                 }
                 resolve();
             },
-            onError: () => resolve()
+            onError: function(error) {
+                console.error('Metadata error:', error);
+                resolve();
+            }
         });
     });
 }
@@ -440,32 +458,52 @@ function updateVisualizerPosition() {
 }
 
 function initVisualizer() {
-    if (!analyser) {
+    if (!audioContext) {
+        audioContext = new (window.AudioContext || window.webkitAudioContext)();
         analyser = audioContext.createAnalyser();
         source = audioContext.createMediaElementSource(audioPlayer);
-        analyser.fftSize = 256; // Reduced from 512 for better performance
-        dataArray = new Uint8Array(analyser.frequencyBinCount);
-        source.connect(analyser);
+
+        // Initialize equalizer filters
+        const freqs = [32, 64, 125, 250, 500, 1000, 2000, 4000, 8000, 16000];
+        eqFilters = freqs.map(freq => {
+            const filter = audioContext.createBiquadFilter();
+            filter.type = 'peaking';
+            filter.frequency.value = freq;
+            filter.gain.value = 0;
+            filter.Q.value = 1.0;
+            return filter;
+        });
+
+        // Chain filters
+        source.connect(eqFilters[0]);
+        for (let i = 0; i < eqFilters.length - 1; i++) {
+            eqFilters[i].connect(eqFilters[i + 1]);
+        }
+        eqFilters[eqFilters.length - 1].connect(analyser);
         analyser.connect(audioContext.destination);
+
+        analyser.fftSize = 512;
+        dataArray = new Uint8Array(analyser.frequencyBinCount);
 
         visualizerScene = new THREE.Scene();
         visualizerCamera = new THREE.PerspectiveCamera(75, window.innerWidth / window.innerHeight, 0.1, 1000);
         visualizerRenderer = new THREE.WebGLRenderer({ canvas: visualizerContainer, alpha: true });
         visualizerRenderer.setSize(window.innerWidth, window.innerHeight);
 
+        // Add lighting
         const ambientLight = new THREE.AmbientLight(0x404040, 0.5);
         visualizerScene.add(ambientLight);
         const pointLight = new THREE.PointLight(0xffffff, 1, 500);
         pointLight.position.set(0, 50, 50);
         visualizerScene.add(pointLight);
 
-        // Simplified bars (fewer, less detailed)
+        // Circular bars lying flat, growing upward
         const bars = [];
-        const barCount = analyser.frequencyBinCount / 4; // 64 bars instead of 128
+        const barCount = analyser.frequencyBinCount / 2;
         const radius = 100;
         for (let i = 0; i < barCount; i++) {
             const angle = (i / barCount) * Math.PI * 2;
-            const geometry = new THREE.CylinderGeometry(1, 1, 1, 16); // Lower poly count
+            const geometry = new THREE.CylinderGeometry(1, 1, 1, 32);
             const material = new THREE.MeshPhongMaterial({ color: 0x1db954 });
             const bar = new THREE.Mesh(geometry, material);
             bar.position.x = Math.cos(angle) * radius;
@@ -474,10 +512,32 @@ function initVisualizer() {
             visualizerScene.add(bar);
         }
 
-        // Simplified particles (fewer, less detailed)
+        // Color bleed glow (radial gradient sprite)
+        const canvas = document.createElement('canvas');
+        canvas.width = 256;
+        canvas.height = 256;
+        const context = canvas.getContext('2d');
+        const gradient = context.createRadialGradient(128, 128, 0, 128, 128, 128);
+        gradient.addColorStop(0, 'rgba(255, 255, 255, 0.8)');
+        gradient.addColorStop(1, 'rgba(255, 255, 255, 0)');
+        context.fillStyle = gradient;
+        context.fillRect(0, 0, 256, 256);
+        const texture = new THREE.CanvasTexture(canvas);
+        const glowMaterial = new THREE.SpriteMaterial({
+            map: texture,
+            color: 0x1db954,
+            transparent: true,
+            opacity: 0.5
+        });
+        const glowSprite = new THREE.Sprite(glowMaterial);
+        glowSprite.scale.set(300, 300, 1);
+        glowSprite.position.y = -1; // Just below bars
+        visualizerScene.add(glowSprite);
+
+        // White spheres flying in the background
         const particles = new THREE.Group();
-        const particleCount = 50; // Reduced from 200
-        const particleGeometry = new THREE.SphereGeometry(0.3, 8, 8); // Lower detail
+        const particleCount = 200;
+        const particleGeometry = new THREE.SphereGeometry(0.5, 16, 16);
         const particleMaterial = new THREE.MeshBasicMaterial({ color: 0xffffff });
         for (let i = 0; i < particleCount; i++) {
             const particle = new THREE.Mesh(particleGeometry, particleMaterial);
@@ -490,27 +550,28 @@ function initVisualizer() {
         }
         visualizerScene.add(particles);
 
-        visualizerCamera.position.set(0, 200, 0);
+        visualizerCamera.position.set(0, 200, 0); // Above the circle
         visualizerCamera.lookAt(visualizerScene.position);
 
-        let frameCount = 0;
-        let lastBass = 0;
         function animate() {
             requestAnimationFrame(animate);
-            frameCount++;
-            if (frameCount % 3 !== 0) return; // Throttle to ~20 FPS
-
             analyser.getByteFrequencyData(dataArray);
-            const bass = Math.min(255, dataArray.slice(0, 16).reduce((sum, val) => sum + val, 0) / 16);
-            const mids = Math.min(255, dataArray.slice(16, 64).reduce((sum, val) => sum + val, 0) / 48);
-            const highs = Math.min(255, dataArray.slice(64, 128).reduce((sum, val) => sum + val, 0) / 64);
 
-            // Update styles only on significant change
-            if (Math.abs(bass - lastBass) > 10) {
-                document.body.style.setProperty('--bg-color', `rgba(${bass * 0.5}, ${mids * 0.5}, ${highs * 0.5}, 0.8)`);
-                lastBass = bass;
-            }
+            const bass = Math.min(255, dataArray.slice(0, 32).reduce((sum, val) => sum + val, 0) / 32);
+            const mids = Math.min(255, dataArray.slice(32, 128).reduce((sum, val) => sum + val, 0) / 96);
+            const highs = Math.min(255, dataArray.slice(128, 256).reduce((sum, val) => sum + val, 0) / 128);
+            const volume = audioPlayer.volume * 255;
 
+            document.body.style.background = `radial-gradient(circle, rgba(${bass * 0.5}, ${mids * 0.5}, ${highs * 0.5}, 0.8), #0a0a0a)`;
+            document.querySelectorAll('.control-btn, .play-btn, .volume-btn').forEach(btn => {
+                btn.style.background = `rgba(${bass * 0.7}, ${mids * 0.7}, ${highs * 0.7}, 0.9)`;
+            });
+
+            const dynamicColor = `rgb(${bass}, ${mids}, ${highs})`;
+            progressFill.style.background = dynamicColor;
+            volumeFill.style.background = dynamicColor;
+
+            // Animate bars
             bars.forEach((bar, i) => {
                 const height = Math.max(1, dataArray[i] / 5);
                 bar.scale.y = height;
@@ -518,6 +579,11 @@ function initVisualizer() {
                 bar.material.color.setRGB(bass / 255, mids / 255, highs / 255);
             });
 
+            // Animate glow
+            glowMaterial.color.setRGB(bass / 255, mids / 255, highs / 255);
+            glowMaterial.opacity = 0.3 + bass / 255 * 0.3;
+
+            // Animate white spheres
             particles.children.forEach(p => {
                 p.position.y += bass / 100;
                 if (p.position.y > 150) p.position.y = -150;
@@ -525,6 +591,7 @@ function initVisualizer() {
             particles.rotation.y += 0.01;
 
             pointLight.intensity = 1 + bass / 255;
+
             visualizerRenderer.render(visualizerScene, visualizerCamera);
         }
         animate();
@@ -534,17 +601,78 @@ function initVisualizer() {
 function cyclePlaybackMode() {
     const modes = ['off', 'loop', 'next', 'shuffle'];
     const icons = ['🚫', '♾️', '➡️', '🎲'];
-    const tooltips = ['No playback mode', 'Loop current song', 'Play next song', 'Shuffle playlist'];
+    const tooltips = [
+        'No playback mode',
+        'Loop current song',
+        'Play next song',
+        'Shuffle playlist'
+    ];
     const currentIndex = modes.indexOf(playbackMode);
     playbackMode = modes[(currentIndex + 1) % modes.length];
     playbackModeBtn.textContent = icons[modes.indexOf(playbackMode)];
     playbackModeBtn.setAttribute('data-tooltip', tooltips[modes.indexOf(playbackMode)]);
+    console.log('Playback mode set to:', playbackMode);
 }
 
 function toggleEqualizerModal() {
     equalizerModal.style.display = equalizerModal.style.display === 'flex' ? 'none' : 'flex';
 }
 
+// Equalizer Presets
+const equalizerPresets = {
+    flat: [0, 0, 0, 0, 0, 0, 0, 0, 0, 0],
+    bass: [6, 4, 2, 0, 0, 0, 0, 0, 0, 0],
+    treble: [0, 0, 0, 0, 0, 0, 2, 4, 6, 8],
+    pop: [0, 2, 4, 6, 4, 2, 0, -2, -4, -6],
+    rock: [4, 3, 2, 0, -2, -3, -2, 0, 2, 4]
+};
+
+function applyEqualizerPreset(preset) {
+    const gains = equalizerPresets[preset] || equalizerPresets.flat;
+    const sliders = document.querySelectorAll('.eq-sliders input');
+    sliders.forEach((slider, index) => {
+        slider.value = gains[index];
+        eqFilters[index].gain.value = gains[index];
+        slider.parentElement.querySelector('.gain-value').textContent = `${gains[index]} dB`;
+    });
+}
+
+function setupEqualizer() {
+    const presetButtons = document.querySelectorAll('.preset-btn');
+    const sliders = document.querySelectorAll('.eq-sliders input');
+
+    presetButtons.forEach(btn => {
+        btn.addEventListener('click', () => {
+            presetButtons.forEach(b => b.classList.remove('active'));
+            btn.classList.add('active');
+            const preset = btn.dataset.preset;
+            if (preset === 'custom') {
+                sliders.forEach(slider => slider.disabled = false);
+            } else {
+                sliders.forEach(slider => slider.disabled = true);
+                applyEqualizerPreset(preset);
+            }
+        });
+    });
+
+    sliders.forEach((slider, index) => {
+        slider.addEventListener('input', () => {
+            const gain = parseFloat(slider.value);
+            eqFilters[index].gain.value = gain;
+            slider.parentElement.querySelector('.gain-value').textContent = `${gain} dB`;
+            presetButtons.forEach(btn => btn.classList.remove('active'));
+            document.querySelector('.preset-btn[data-preset="custom"]').classList.add('active');
+            sliders.forEach(s => s.disabled = false);
+        });
+    });
+
+    // Default to Flat preset
+    applyEqualizerPreset('flat');
+    document.querySelector('.preset-btn[data-preset="flat"]').classList.add('active');
+    sliders.forEach(slider => slider.disabled = true);
+}
+
+// Keyboard controls
 document.addEventListener('keydown', (e) => {
     switch (e.key) {
         case ' ':
@@ -562,8 +690,9 @@ document.addEventListener('keydown', (e) => {
     }
 });
 
-document.body.style.background = 'radial-gradient(circle, var(--bg-color, rgba(20, 20, 20, 0.8)), #0a0a0a)';
+document.body.style.background = 'radial-gradient(circle, rgba(20, 20, 20, 0.8), #0a0a0a)';
 flatSongs = songsFlatWithStructure(songs);
 displaySongs();
 setVolume();
 cyclePlaybackMode();
+setupEqualizer();
